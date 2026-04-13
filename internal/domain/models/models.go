@@ -68,7 +68,7 @@ type Movement struct {
 	UsuarioSalida   *string    `gorm:"column:usuario_salida" json:"usuario_salida"`
 	FechaHoraAnula  *time.Time `gorm:"column:fecha_hora_anula" json:"fecha_hora_anula"`
 	FechaHoraUpdate time.Time  `gorm:"column:fecha_hora_update;autoUpdateNow" json:"fecha_hora_update"`
-	TarifaDescripcion string  `gorm:"-" json:"tarifa_descripcion"`
+	TarifaDescripcion string  `gorm:"->" json:"tarifa_descripcion"`
 }
 
 func (Movement) TableName() string {
