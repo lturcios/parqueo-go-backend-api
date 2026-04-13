@@ -84,7 +84,7 @@ type MovementFilter struct {
 }
 
 func GetMovements(filter MovementFilter, page int, pageSize int) ([]models.Movement, int64, float64, error) {
-	var movements []models.Movement
+	movements := []models.Movement{}
 	var totalCount int64
 	var totalIngresos float64
 
