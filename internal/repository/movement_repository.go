@@ -7,6 +7,7 @@ import (
 
 	"github.com/parqueo/api/internal/database"
 	"github.com/parqueo/api/internal/domain/models"
+	"gorm.io/gorm"
 )
 
 func RegisterEntry(movement *models.Movement) error {
@@ -88,48 +89,49 @@ func GetMovements(filter MovementFilter, page int, pageSize int) ([]models.Movem
 	var totalIngresos float64
 
 	// 1. Construir la consulta base con los filtros comunes
-	baseQuery := database.DB.Table("parkmovimientos as p").
+	tx := database.DB.Table("parkmovimientos as p").
 		Joins("LEFT JOIN parktarifas pt ON p.codigo_presup = pt.codigo_presup AND p.ubicacion_id_fk = pt.ubicacion_id_fk").
 		Where("p.ubicacion_id_fk = ?", filter.UbicacionID)
 
 	// Filtrar por tipo (normal vs otros)
 	if filter.Tipo == "otros" {
-		baseQuery = baseQuery.Where("LOWER(p.placa) = ?", "otros")
+		tx = tx.Where("LOWER(p.placa) = ?", "otros")
 		if filter.TarifaID > 0 {
-			baseQuery = baseQuery.Where("p.codigo_presup = ?", filter.TarifaID)
+			tx = tx.Where("p.codigo_presup = ?", filter.TarifaID)
 		}
 	} else {
-		baseQuery = baseQuery.Where("LOWER(p.placa) != ?", "otros")
+		tx = tx.Where("LOWER(p.placa) != ?", "otros")
 	}
 
 	if filter.FechaInicio != "" && filter.FechaFin != "" {
 		if filter.FechaInicio == filter.FechaFin {
-			baseQuery = baseQuery.Where("DATE(p.fecha_horaentra) = ?", filter.FechaInicio)
+			tx = tx.Where("DATE(p.fecha_horaentra) = ?", filter.FechaInicio)
 		} else {
-			baseQuery = baseQuery.Where("DATE(p.fecha_horaentra) BETWEEN ? AND ?", filter.FechaInicio, filter.FechaFin)
+			tx = tx.Where("DATE(p.fecha_horaentra) BETWEEN ? AND ?", filter.FechaInicio, filter.FechaFin)
 		}
 	}
 
 	switch filter.Estado {
 	case "activos":
-		baseQuery = baseQuery.Where("p.fecha_horasale IS NULL")
+		tx = tx.Where("p.fecha_horasale IS NULL")
 	case "cerrados":
-		baseQuery = baseQuery.Where("p.fecha_horasale IS NOT NULL")
+		tx = tx.Where("p.fecha_horasale IS NOT NULL")
 	}
 
-	// 2. Ejecutar conteo total (usando una copia de la query base)
-	if err := baseQuery.Count(&totalCount).Error; err != nil {
+	// 2. Ejecutar conteo total usando una sesión independiente
+	if err := tx.Session(&gorm.Session{}).Count(&totalCount).Error; err != nil {
 		return nil, 0, 0, err
 	}
 
-	// 3. Calcular ingresos totales (usando otra copia de la query base)
-	if err := baseQuery.Select("IFNULL(SUM(p.monto_total), 0)").Row().Scan(&totalIngresos); err != nil {
+	// 3. Calcular ingresos totales usando una sesión independiente
+	if err := tx.Session(&gorm.Session{}).Select("IFNULL(SUM(p.monto_total), 0)").Row().Scan(&totalIngresos); err != nil {
 		return nil, 0, 0, err
 	}
 
-	// 4. Obtener registros paginados
+	// 4. Obtener registros paginados usando una sesión independiente
 	offset := (page - 1) * pageSize
-	err := baseQuery.Select("p.*, pt.descripcion as tarifa_descripcion").
+	err := tx.Session(&gorm.Session{}).
+		Select("p.*, pt.descripcion as tarifa_descripcion").
 		Order("p.fecha_horaentra DESC").
 		Offset(offset).
 		Limit(pageSize).
