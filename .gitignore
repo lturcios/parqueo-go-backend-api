@@ -1,0 +1,27 @@
+#parqueo-go-backend-api
+#Proyecto backend (en Go) para el sistema de administración de Parqueos 
+
+# Environment variables
+.env
+# Node modules
+node_modules/
+# Build output
+parqueo-api/
+# Logs
+logs/
+# OS generated files
+.DS_Store
+Thumbs.db
+# IDE specific files
+.vscode/
+.idea/
+# Temporary files
+*.tmp
+# Coverage reports
+coverage/
+# Dependency directories
+vendor/
+# skills
+skills/
+
+
