@@ -25,6 +25,53 @@ func GetMovementByID(pagoID string) (*models.Movement, error) {
 	return &movement, nil
 }
 
+func CalculateOwedAmount(entryTime time.Time, budgetCode int, locationID uint) (float64, uint) {
+	rates, err := GetRatesForCalculation(budgetCode, locationID)
+	if err != nil || len(rates) == 0 {
+		return 0, 0
+	}
+
+	diff := time.Now().Sub(entryTime).Minutes()
+	totalMinutes := uint(diff)
+	
+	// Por ahora asumimos Periodo 'H' (Horas). Si es 'D' (Días) la lógica se escala.
+	// Redondeo hacia arriba a la unidad superior
+	totalUnits := int(math.Ceil(diff / 60.0))
+	if totalUnits == 0 {
+		totalUnits = 1
+	}
+
+	var totalOwed float64
+	remainingUnits := totalUnits
+
+	for _, rate := range rates {
+		if remainingUnits <= 0 {
+			break
+		}
+
+		// Capacidad de este tramo
+		tierSize := (rate.TiempoMaximo - rate.TiempoMinimo) + 1
+		
+		unitsInThisTier := 0
+		if remainingUnits > tierSize {
+			unitsInThisTier = tierSize
+		} else {
+			unitsInThisTier = remainingUnits
+		}
+
+		totalOwed += float64(unitsInThisTier) * rate.PrecioUnitario
+		remainingUnits -= unitsInThisTier
+	}
+
+	// Si sobran unidades y ya no hay más tramos, usamos el precio del último tramo encontrado
+	if remainingUnits > 0 && len(rates) > 0 {
+		lastRate := rates[len(rates)-1]
+		totalOwed += float64(remainingUnits) * lastRate.PrecioUnitario
+	}
+
+	return totalOwed, totalMinutes
+}
+
 func RegisterExit(pagoID string, userEmail string) (*models.Movement, error) {
 	movement, err := GetMovementByID(pagoID)
 	if err != nil {
@@ -35,20 +82,10 @@ func RegisterExit(pagoID string, userEmail string) (*models.Movement, error) {
 	movement.FechaHoraSale = &now
 	movement.UsuarioSalida = &userEmail
 
-	rate, err := GetRate(int(movement.CodigoPresup), movement.UbicacionID)
-	if err != nil {
-		return nil, err
-	}
-
-	diff := now.Sub(movement.FechaHoraEntra).Minutes()
-	movement.TiempoMinutos = new(uint)
-	*movement.TiempoMinutos = uint(diff)
-
-	horas := math.Ceil(diff / 60.0)
-	if horas == 0 {
-		horas = 1
-	}
-	movement.MontoTotal = horas * rate.PrecioUnitario
+	monto, minutos := CalculateOwedAmount(movement.FechaHoraEntra, int(movement.CodigoPresup), movement.UbicacionID)
+	
+	movement.TiempoMinutos = &minutos
+	movement.MontoTotal = monto
 	movement.FechaHoraPago = &now
 
 	err = database.DB.Save(movement).Error
@@ -136,6 +173,13 @@ func GetMovements(filter MovementFilter, page int, pageSize int) ([]models.Movem
 		Offset(offset).
 		Limit(pageSize).
 		Scan(&movements).Error
+
+	if err == nil && filter.Estado == "activos" {
+		for i := range movements {
+			monto, _ := CalculateOwedAmount(movements[i].FechaHoraEntra, int(movements[i].CodigoPresup), movements[i].UbicacionID)
+			movements[i].MontoTotal = monto
+		}
+	}
 
 	return movements, totalCount, totalIngresos, err
 }

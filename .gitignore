@@ -6,7 +6,7 @@
 # Node modules
 node_modules/
 # Build output
-parqueo-api/
+parqueo-api
 # Logs
 logs/
 # OS generated files
@@ -23,5 +23,3 @@ coverage/
 vendor/
 # skills
 skills/
-
-

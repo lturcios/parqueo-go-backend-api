@@ -5,6 +5,15 @@ import (
 	"github.com/parqueo/api/internal/domain/models"
 )
 
+func GetRatesForCalculation(budgetCode int, locationID uint) ([]models.Rate, error) {
+	var rates []models.Rate
+	// Buscamos todas las tarifas vigentes para ese código y ubicación, ordenadas por tiempo_minimo
+	err := database.DB.Where("codigo_presup = ? AND ubicacion_id_fk = ? AND vigente = 1", budgetCode, locationID).
+		Order("tiempo_minimo ASC").
+		Find(&rates).Error
+	return rates, err
+}
+
 func GetRate(budgetCode int, locationID uint) (*models.Rate, error) {
 	var rate models.Rate
 	err := database.DB.Where("codigo_presup = ? AND ubicacion_id_fk = ? AND vigente = 1", budgetCode, locationID).First(&rate).Error
