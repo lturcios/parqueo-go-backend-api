@@ -3,6 +3,9 @@ package repository
 import (
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/parqueo/api/internal/domain/models"
 
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
@@ -46,5 +49,50 @@ func TestMovementsQueryDoesNotMultiplyRowsByRateTiers(t *testing.T) {
 		if !strings.Contains(pageSQL, "LIMIT 1) AS tarifa_descripcion") {
 			t.Errorf("page query must pick a single rate description per movement, got: %s", pageSQL)
 		}
+	}
+}
+
+func projectionFixture() []models.Movement {
+	exit := time.Date(2026, 11, 24, 10, 0, 0, 0, time.UTC)
+	return []models.Movement{
+		{PagoID: "open", FechaHoraEntra: exit.Add(-2 * time.Hour), MontoTotal: 0},
+		{PagoID: "closed", FechaHoraEntra: exit.Add(-3 * time.Hour), FechaHoraSale: &exit, FechaHoraPago: &exit, MontoTotal: 2.25},
+	}
+}
+
+func fixedCalculator(entryTime time.Time, budgetCode int, locationID uint) (float64, uint) {
+	return 9.99, 0
+}
+
+func TestProjectOwedAmountsActiveFilterAlwaysProjects(t *testing.T) {
+	movements := projectionFixture()[:1]
+
+	projectOwedAmounts(movements, MovementFilter{Estado: "activos"}, fixedCalculator)
+
+	if movements[0].MontoTotal != 9.99 {
+		t.Fatalf("expected projected amount 9.99, got %v", movements[0].MontoTotal)
+	}
+}
+
+func TestProjectOwedAmountsAllFilterWithoutProjectionKeepsStoredAmounts(t *testing.T) {
+	movements := projectionFixture()
+
+	projectOwedAmounts(movements, MovementFilter{Estado: "todos"}, fixedCalculator)
+
+	if movements[0].MontoTotal != 0 || movements[1].MontoTotal != 2.25 {
+		t.Fatalf("expected stored amounts 0 and 2.25, got %v and %v", movements[0].MontoTotal, movements[1].MontoTotal)
+	}
+}
+
+func TestProjectOwedAmountsAllFilterWithProjectionOnlyProjectsOpenMovements(t *testing.T) {
+	movements := projectionFixture()
+
+	projectOwedAmounts(movements, MovementFilter{Estado: "todos", Proyeccion: true}, fixedCalculator)
+
+	if movements[0].MontoTotal != 9.99 {
+		t.Fatalf("expected open movement projected to 9.99, got %v", movements[0].MontoTotal)
+	}
+	if movements[1].MontoTotal != 2.25 {
+		t.Fatalf("expected closed movement to keep 2.25, got %v", movements[1].MontoTotal)
 	}
 }

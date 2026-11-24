@@ -118,6 +118,7 @@ type MovementFilter struct {
 	UbicacionID uint
 	Tipo        string // "normal" u "otros"
 	TarifaID    uint   // Filtro específico para otros ingresos
+	Proyeccion  bool   // With Estado "todos", project the owed amount of open movements
 }
 
 // movementsSelect picks one rate description per movement. A codigo_presup can have
@@ -187,12 +188,28 @@ func GetMovements(filter MovementFilter, page int, pageSize int) ([]models.Movem
 		Limit(pageSize).
 		Scan(&movements).Error
 
-	if err == nil && filter.Estado == "activos" {
-		for i := range movements {
-			monto, _ := CalculateOwedAmount(movements[i].FechaHoraEntra, int(movements[i].CodigoPresup), movements[i].UbicacionID)
-			movements[i].MontoTotal = monto
-		}
+	if err == nil {
+		projectOwedAmounts(movements, filter, CalculateOwedAmount)
 	}
 
 	return movements, totalCount, totalIngresos, err
+}
+
+type owedAmountCalculator func(entryTime time.Time, budgetCode int, locationID uint) (float64, uint)
+
+// projectOwedAmounts replaces monto_total of open movements (no exit yet) with the amount
+// owed if the vehicle left now. The "activos" filter always projects; "todos" projects only
+// when requested. Closed or annulled movements keep the amount stored by the app.
+func projectOwedAmounts(movements []models.Movement, filter MovementFilter, calculate owedAmountCalculator) {
+	projectAll := filter.Proyeccion && filter.Estado != "cerrados"
+	if filter.Estado != "activos" && !projectAll {
+		return
+	}
+	for i := range movements {
+		if movements[i].FechaHoraSale != nil {
+			continue
+		}
+		monto, _ := calculate(movements[i].FechaHoraEntra, int(movements[i].CodigoPresup), movements[i].UbicacionID)
+		movements[i].MontoTotal = monto
+	}
 }

@@ -48,6 +48,7 @@ func GetMovements(c *fiber.Ctx) error {
 		Estado:      c.Query("estado"),
 		Tipo:        c.Query("tipo", "normal"),
 		TarifaID:    uint(cast.ToInt(c.Query("tarifa_id", "0"))),
+		Proyeccion:  c.QueryBool("proyeccion"),
 		UbicacionID: locationID,
 	}
 
