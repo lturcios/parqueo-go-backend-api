@@ -10,6 +10,9 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
+// getUserByEmail is a package-level seam so tests can replace the database lookup.
+var getUserByEmail = repository.GetUserByEmail
+
 type LoginRequest struct {
 	Email    string `json:"email"`
 	Password string `json:"password"`
@@ -21,17 +24,14 @@ func Login(c *fiber.Ctx) error {
 		return c.Status(400).JSON(fiber.Map{"error": "Cannot parse JSON"})
 	}
 
-	user, err := repository.GetUserByEmail(req.Email)
+	user, err := getUserByEmail(req.Email)
 	if err != nil {
 		return c.Status(401).JSON(fiber.Map{"error": "Invalid credentials"})
 	}
 
-	// Compare password (assuming bcrypt, fallback to plain if needed for migration)
+	// Only bcrypt hashes are accepted; plain-text stored passwords are rejected.
 	if err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(req.Password)); err != nil {
-		// Temporary fallback for plain text if migration is in progress
-		if user.Password != req.Password {
-			return c.Status(401).JSON(fiber.Map{"error": "Invalid credentials"})
-		}
+		return c.Status(401).JSON(fiber.Map{"error": "Invalid credentials"})
 	}
 
 	// Create JWT token
