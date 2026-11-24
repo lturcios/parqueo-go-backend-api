@@ -120,14 +120,16 @@ type MovementFilter struct {
 	TarifaID    uint   // Filtro específico para otros ingresos
 }
 
-func GetMovements(filter MovementFilter, page int, pageSize int) ([]models.Movement, int64, float64, error) {
-	movements := []models.Movement{}
-	var totalCount int64
-	var totalIngresos float64
+// movementsSelect picks one rate description per movement. A codigo_presup can have
+// several tiers (rows in parktarifas), so joining the table would duplicate movements;
+// the current (vigente) rate and its first tier win.
+const movementsSelect = "p.*, (SELECT pt.descripcion FROM parktarifas pt" +
+	" WHERE pt.codigo_presup = p.codigo_presup AND pt.ubicacion_id_fk = p.ubicacion_id_fk" +
+	" ORDER BY pt.vigente DESC, pt.tiempo_minimo ASC LIMIT 1) AS tarifa_descripcion"
 
-	// 1. Construir la consulta base con los filtros comunes
-	tx := database.DB.Table("parkmovimientos as p").
-		Joins("LEFT JOIN parktarifas pt ON p.codigo_presup = pt.codigo_presup AND p.ubicacion_id_fk = pt.ubicacion_id_fk").
+// movementsQuery builds the filtered base query shared by the count, the revenue sum and the page.
+func movementsQuery(db *gorm.DB, filter MovementFilter) *gorm.DB {
+	tx := db.Table("parkmovimientos as p").
 		Where("p.ubicacion_id_fk = ?", filter.UbicacionID)
 
 	// Filtrar por tipo (normal vs otros)
@@ -155,6 +157,17 @@ func GetMovements(filter MovementFilter, page int, pageSize int) ([]models.Movem
 		tx = tx.Where("p.fecha_horasale IS NOT NULL")
 	}
 
+	return tx
+}
+
+func GetMovements(filter MovementFilter, page int, pageSize int) ([]models.Movement, int64, float64, error) {
+	movements := []models.Movement{}
+	var totalCount int64
+	var totalIngresos float64
+
+	// 1. Construir la consulta base con los filtros comunes
+	tx := movementsQuery(database.DB, filter)
+
 	// 2. Ejecutar conteo total usando una sesión independiente
 	if err := tx.Session(&gorm.Session{}).Count(&totalCount).Error; err != nil {
 		return nil, 0, 0, err
@@ -168,7 +181,7 @@ func GetMovements(filter MovementFilter, page int, pageSize int) ([]models.Movem
 	// 4. Obtener registros paginados usando una sesión independiente
 	offset := (page - 1) * pageSize
 	err := tx.Session(&gorm.Session{}).
-		Select("p.*, pt.descripcion as tarifa_descripcion").
+		Select(movementsSelect).
 		Order("p.fecha_horaentra DESC").
 		Offset(offset).
 		Limit(pageSize).
