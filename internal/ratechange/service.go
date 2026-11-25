@@ -1,6 +1,7 @@
 // Package ratechange holds the rules for correcting the rate of an active ticket.
 // Tickets of Firestore clients live in Firestore: the device sees the change through its
-// realtime listener and a Cloud Function forwards it to MySQL, so the change is written there.
+// realtime listener, so the change is written there first. It is then mirrored to MySQL
+// so the web listing shows it without waiting for the Cloud Function.
 package ratechange
 
 import (
@@ -64,6 +65,19 @@ type Rates interface {
 	Description(code int, locationID uint) (string, error)
 }
 
+// Mirror copies a change already stored in Firestore to the MySQL movement, only while
+// the movement is still open there. updated is false when no open row matched, for example
+// because the Cloud Function has not inserted the entry yet.
+type Mirror interface {
+	ApplyRateChange(ctx context.Context, locationID uint, pagoID string, change Change) (updated bool, err error)
+}
+
+// Result describes a rate change that was stored in Firestore.
+type Result struct {
+	MySQLUpdated bool  // the MySQL movement already shows the new rate
+	MySQLErr     error // the MySQL copy failed; the Cloud Function sync is the fallback
+}
+
 type Request struct {
 	LocationID  uint
 	PagoID      string
@@ -72,9 +86,10 @@ type Request struct {
 }
 
 type Service struct {
-	Store Store // nil when Firestore is not configured
-	Rates Rates
-	Now   func() time.Time
+	Store  Store // nil when Firestore is not configured
+	Rates  Rates
+	Mirror Mirror // nil skips the MySQL copy
+	Now    func() time.Time
 }
 
 // pagoIDPattern matches the ids the Android app generates and keeps request input from
@@ -99,29 +114,33 @@ func (s *Service) Available(ctx context.Context, locationID uint) (bool, error) 
 }
 
 // ChangeRate sets a new rate on an active ticket and appends an audit note to its observations.
-func (s *Service) ChangeRate(ctx context.Context, req Request) error {
+// Firestore decides: once the change is stored there, it counts as done even if the MySQL copy
+// fails, because the device already uses the new rate. Result reports how the copy went.
+func (s *Service) ChangeRate(ctx context.Context, req Request) (Result, error) {
 	if s.Store == nil {
-		return ErrUnavailable
+		return Result{}, ErrUnavailable
 	}
 	docID, ok, err := s.Store.MovementsDoc(ctx, req.LocationID)
 	if err != nil {
-		return err
+		return Result{}, err
 	}
 	if !ok {
-		return ErrUnavailable
+		return Result{}, ErrUnavailable
 	}
 	if !validPagoID(req.PagoID) {
-		return ErrNotFound
+		return Result{}, ErrNotFound
 	}
 	newRate, ok, err := s.Rates.VehicleRate(req.NewRateCode, req.LocationID)
 	if err != nil {
-		return err
+		return Result{}, err
 	}
 	if !ok {
-		return ErrInvalidRate
+		return Result{}, ErrInvalidRate
 	}
 
-	return s.Store.UpdateTicket(ctx, docID, req.PagoID, func(ticket Ticket) (Change, error) {
+	// A retried transaction runs apply again; the last run is the one Firestore committed.
+	var committed Change
+	err = s.Store.UpdateTicket(ctx, docID, req.PagoID, func(ticket Ticket) (Change, error) {
 		switch {
 		case !ticket.Active:
 			return Change{}, ErrNotActive
@@ -139,12 +158,22 @@ func (s *Service) ChangeRate(ctx context.Context, req Request) error {
 		}
 		note := fmt.Sprintf("Tarifa cambiada de %s a %s por %s el %s",
 			oldDescription, newRate.Description, req.UserEmail, s.Now().Format("2006-01-02 15:04"))
-		return Change{
+		committed = Change{
 			RateCode:     int64(req.NewRateCode),
 			UnitPrice:    newRate.UnitPrice,
 			Observations: appendNote(ticket.Observations, note),
-		}, nil
+		}
+		return committed, nil
 	})
+	if err != nil {
+		return Result{}, err
+	}
+
+	if s.Mirror == nil {
+		return Result{}, nil
+	}
+	updated, err := s.Mirror.ApplyRateChange(ctx, req.LocationID, req.PagoID, committed)
+	return Result{MySQLUpdated: updated && err == nil, MySQLErr: err}, nil
 }
 
 // appendNote adds note after the existing observations within maxObservations characters.

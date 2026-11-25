@@ -1,11 +1,13 @@
 package repository
 
 import (
+	"context"
 	"math"
 	"time"
 
 	"github.com/parqueo/api/internal/database"
 	"github.com/parqueo/api/internal/domain/models"
+	"github.com/parqueo/api/internal/ratechange"
 	"gorm.io/gorm"
 )
 
@@ -199,4 +201,27 @@ func projectOwedAmounts(movements []models.Movement, filter MovementFilter, calc
 		movements[i].MontoTotal = monto
 	}
 	return nil
+}
+
+// MovementMirror implements ratechange.Mirror on parkmovimientos.
+type MovementMirror struct{}
+
+// rateChangeUpdate writes the three rate-change fields to the movement while it is still open.
+// fecha_hora_update refreshes on its own (ON UPDATE CURRENT_TIMESTAMP).
+func rateChangeUpdate(db *gorm.DB, locationID uint, pagoID string, change ratechange.Change) *gorm.DB {
+	return db.Table("parkmovimientos").
+		Where("pago_id = ? AND ubicacion_id_fk = ?", pagoID, locationID).
+		Where("fecha_horasale IS NULL AND fecha_horapago IS NULL AND fecha_hora_anula IS NULL").
+		Updates(map[string]any{
+			"codigo_presup":   change.RateCode,
+			"precio_unitario": change.UnitPrice,
+			"observaciones":   change.Observations,
+		})
+}
+
+// ApplyRateChange copies a rate change to MySQL; updated is false when no open movement matched.
+// The request context bounds the query, so a stalled connection cannot hold the request.
+func (MovementMirror) ApplyRateChange(ctx context.Context, locationID uint, pagoID string, change ratechange.Change) (bool, error) {
+	result := rateChangeUpdate(database.DB.WithContext(ctx), locationID, pagoID, change)
+	return result.RowsAffected > 0, result.Error
 }

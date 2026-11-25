@@ -59,7 +59,7 @@ func newService(ticket Ticket) (*Service, *fakeStore) {
 			1001: {Description: "VEHICULO LIVIANO", UnitPrice: 1.50},
 			1002: {Description: "MOTOCICLETA", UnitPrice: 1.00},
 		},
-		all:     map[int]string{1001: "VEHICULO LIVIANO", 1002: "MOTOCICLETA", 900: "TARIFA ANTIGUA"},
+		all: map[int]string{1001: "VEHICULO LIVIANO", 1002: "MOTOCICLETA", 900: "TARIFA ANTIGUA"},
 	}
 	now := func() time.Time { return time.Date(2026, 11, 24, 23, 20, 0, 0, time.Local) }
 	return &Service{Store: store, Rates: rates, Now: now}, store
@@ -78,7 +78,7 @@ func TestChangeRateUpdatesOnlyRateAndAppendsNote(t *testing.T) {
 	ticket.Observations = "CLIENTE FRECUENTE"
 	svc, store := newService(ticket)
 
-	if err := svc.ChangeRate(context.Background(), request(1002)); err != nil {
+	if _, err := svc.ChangeRate(context.Background(), request(1002)); err != nil {
 		t.Fatalf("expected success, got %v", err)
 	}
 
@@ -96,7 +96,7 @@ func TestChangeRateUpdatesOnlyRateAndAppendsNote(t *testing.T) {
 func TestChangeRateNoteWithoutPreviousObservations(t *testing.T) {
 	svc, store := newService(activeTicket())
 
-	if err := svc.ChangeRate(context.Background(), request(1002)); err != nil {
+	if _, err := svc.ChangeRate(context.Background(), request(1002)); err != nil {
 		t.Fatalf("expected success, got %v", err)
 	}
 
@@ -111,7 +111,7 @@ func TestChangeRateDescribesRetiredCurrentRate(t *testing.T) {
 	ticket.RateCode = 900
 	svc, store := newService(ticket)
 
-	if err := svc.ChangeRate(context.Background(), request(1002)); err != nil {
+	if _, err := svc.ChangeRate(context.Background(), request(1002)); err != nil {
 		t.Fatalf("expected success, got %v", err)
 	}
 
@@ -145,7 +145,7 @@ func TestChangeRateRejections(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			svc, store := newService(tc.ticket)
 
-			err := svc.ChangeRate(context.Background(), tc.req)
+			_, err := svc.ChangeRate(context.Background(), tc.req)
 
 			if !errors.Is(err, tc.want) {
 				t.Fatalf("expected %v, got %v", tc.want, err)
@@ -164,7 +164,7 @@ func TestServiceWithoutStoreIsUnavailable(t *testing.T) {
 	if err != nil || available {
 		t.Fatalf("expected unavailable without error, got %v, %v", available, err)
 	}
-	if err := svc.ChangeRate(context.Background(), request(1002)); !errors.Is(err, ErrUnavailable) {
+	if _, err := svc.ChangeRate(context.Background(), request(1002)); !errors.Is(err, ErrUnavailable) {
 		t.Fatalf("expected ErrUnavailable, got %v", err)
 	}
 }
@@ -204,5 +204,120 @@ func TestAppendNoteTruncatesOversizedNote(t *testing.T) {
 
 	if n := len([]rune(got)); n != maxObservations {
 		t.Fatalf("expected %d characters, got %d", maxObservations, n)
+	}
+}
+
+type fakeMirror struct {
+	updated bool
+	err     error
+	calls   []Change
+}
+
+func (f *fakeMirror) ApplyRateChange(ctx context.Context, locationID uint, pagoID string, change Change) (bool, error) {
+	if ctx == nil {
+		return false, errors.New("missing context")
+	}
+	if locationID != 8 || pagoID != "G5V._iBQMhib04_P" {
+		return false, errors.New("unexpected ticket")
+	}
+	f.calls = append(f.calls, change)
+	return f.updated, f.err
+}
+
+func TestChangeRateMirrorsTheStoredChangeToMySQL(t *testing.T) {
+	svc, store := newService(activeTicket())
+	mirror := &fakeMirror{updated: true}
+	svc.Mirror = mirror
+
+	result, err := svc.ChangeRate(context.Background(), request(1002))
+
+	if err != nil {
+		t.Fatalf("expected success, got %v", err)
+	}
+	written := store.writes["LT-8/G5V._iBQMhib04_P"]
+	if len(mirror.calls) != 1 || mirror.calls[0] != written {
+		t.Fatalf("expected MySQL to receive the Firestore change %+v, got %+v", written, mirror.calls)
+	}
+	if !result.MySQLUpdated || result.MySQLErr != nil {
+		t.Fatalf("expected MySQL updated without error, got %+v", result)
+	}
+}
+
+func TestChangeRateWithoutMySQLRowStillSucceeds(t *testing.T) {
+	svc, _ := newService(activeTicket())
+	svc.Mirror = &fakeMirror{updated: false}
+
+	result, err := svc.ChangeRate(context.Background(), request(1002))
+
+	if err != nil || result.MySQLUpdated || result.MySQLErr != nil {
+		t.Fatalf("expected success with no MySQL row updated, got %+v, %v", result, err)
+	}
+}
+
+func TestChangeRateReportsMySQLFailureAfterFirestoreWrite(t *testing.T) {
+	svc, store := newService(activeTicket())
+	svc.Mirror = &fakeMirror{err: errors.New("mysql down")}
+
+	result, err := svc.ChangeRate(context.Background(), request(1002))
+
+	if err != nil {
+		t.Fatalf("expected the Firestore change to count as success, got %v", err)
+	}
+	if len(store.writes) != 1 {
+		t.Fatalf("expected the Firestore write to stay, got %+v", store.writes)
+	}
+	if result.MySQLUpdated || result.MySQLErr == nil {
+		t.Fatalf("expected the MySQL error to be reported, got %+v", result)
+	}
+}
+
+func TestChangeRateDoesNotTouchMySQLWhenFirestoreRejects(t *testing.T) {
+	closed := activeTicket()
+	closed.Active = false
+	svc, _ := newService(closed)
+	mirror := &fakeMirror{updated: true}
+	svc.Mirror = mirror
+
+	if _, err := svc.ChangeRate(context.Background(), request(1002)); !errors.Is(err, ErrNotActive) {
+		t.Fatalf("expected ErrNotActive, got %v", err)
+	}
+	if len(mirror.calls) != 0 {
+		t.Fatalf("expected no MySQL update, got %+v", mirror.calls)
+	}
+}
+
+// retryingStore runs apply twice, like a Firestore transaction retried after contention.
+type retryingStore struct {
+	fakeStore
+}
+
+func (r *retryingStore) UpdateTicket(ctx context.Context, docID, pagoID string, apply func(Ticket) (Change, error)) error {
+	first := r.tickets[docID+"/"+pagoID]
+	if _, err := apply(first); err != nil {
+		return err
+	}
+	second := first
+	second.Observations = "NOTA DEL DISPOSITIVO"
+	change, err := apply(second)
+	if err != nil {
+		return err
+	}
+	r.writes = map[string]Change{docID + "/" + pagoID: change}
+	return nil
+}
+
+func TestChangeRateMirrorsTheCommittedAttemptAfterRetry(t *testing.T) {
+	svc, base := newService(activeTicket())
+	store := &retryingStore{fakeStore: *base}
+	svc.Store = store
+	mirror := &fakeMirror{updated: true}
+	svc.Mirror = mirror
+
+	if _, err := svc.ChangeRate(context.Background(), request(1002)); err != nil {
+		t.Fatalf("expected success, got %v", err)
+	}
+	committed := store.writes["LT-8/G5V._iBQMhib04_P"]
+	if len(mirror.calls) != 1 || mirror.calls[0] != committed {
+		t.Fatalf("expected MySQL to get the committed change %+v, got %+v", committed, mirror.calls)
 	}
 }
