@@ -3,12 +3,14 @@ package handlers
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"net/http/httptest"
 	"testing"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/parqueo/api/internal/domain/models"
 	"golang.org/x/crypto/bcrypt"
+	"gorm.io/gorm"
 )
 
 func stubUser(t *testing.T, storedPassword string) {
@@ -107,5 +109,41 @@ func TestLoginRejectsWrongPasswordForBcryptHash(t *testing.T) {
 	}
 	if payload["error"] != "Invalid credentials" {
 		t.Fatalf("expected Invalid credentials error, got %v", payload["error"])
+	}
+}
+
+func stubLookupError(t *testing.T, lookupErr error) {
+	t.Helper()
+	original := getUserByEmail
+	getUserByEmail = func(email string) (*models.User, error) { return nil, lookupErr }
+	t.Cleanup(func() { getUserByEmail = original })
+}
+
+func TestLoginRejectsUnknownEmail(t *testing.T) {
+	stubLookupError(t, gorm.ErrRecordNotFound)
+
+	status, payload := postLogin(t, "nobody@example.com", "secret123")
+
+	if status != fiber.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d", status)
+	}
+	if payload["error"] != "Invalid credentials" {
+		t.Fatalf("expected Invalid credentials error, got %v", payload["error"])
+	}
+}
+
+func TestLoginReportsDatabaseFailureAsServerError(t *testing.T) {
+	stubLookupError(t, errors.New("dial tcp 10.0.0.5:3306: connect: connection refused"))
+
+	status, payload := postLogin(t, "admin@example.com", "secret123")
+
+	if status != fiber.StatusInternalServerError {
+		t.Fatalf("expected 500, got %d", status)
+	}
+	if payload["error"] != "Internal server error" {
+		t.Fatalf("expected a generic error without database details, got %v", payload["error"])
+	}
+	if _, ok := payload["token"]; ok {
+		t.Fatal("expected no token in response")
 	}
 }

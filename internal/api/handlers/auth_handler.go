@@ -1,6 +1,8 @@
 package handlers
 
 import (
+	"errors"
+	"log"
 	"os"
 	"time"
 
@@ -8,6 +10,7 @@ import (
 	"github.com/golang-jwt/jwt/v4"
 	"github.com/parqueo/api/internal/repository"
 	"golang.org/x/crypto/bcrypt"
+	"gorm.io/gorm"
 )
 
 // getUserByEmail is a package-level seam so tests can replace the database lookup.
@@ -25,8 +28,13 @@ func Login(c *fiber.Ctx) error {
 	}
 
 	user, err := getUserByEmail(req.Email)
-	if err != nil {
+	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return c.Status(401).JSON(fiber.Map{"error": "Invalid credentials"})
+	}
+	if err != nil {
+		// A database failure is not a wrong password: report it as such, without leaking details.
+		log.Printf("login: user lookup failed: %v", err)
+		return c.Status(500).JSON(fiber.Map{"error": "Internal server error"})
 	}
 
 	// Only bcrypt hashes are accepted; plain-text stored passwords are rejected.

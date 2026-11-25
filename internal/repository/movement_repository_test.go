@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -60,8 +61,8 @@ func projectionFixture() []models.Movement {
 	}
 }
 
-func fixedCalculator(entryTime time.Time, budgetCode int, locationID uint) (float64, uint) {
-	return 9.99, 0
+func fixedCalculator(entryTime time.Time, budgetCode int, locationID uint) (float64, uint, error) {
+	return 9.99, 0, nil
 }
 
 func TestProjectOwedAmountsActiveFilterAlwaysProjects(t *testing.T) {
@@ -94,5 +95,24 @@ func TestProjectOwedAmountsAllFilterWithProjectionOnlyProjectsOpenMovements(t *t
 	}
 	if movements[1].MontoTotal != 2.25 {
 		t.Fatalf("expected closed movement to keep 2.25, got %v", movements[1].MontoTotal)
+	}
+}
+
+func TestProjectOwedAmountsReturnsCalculatorErrors(t *testing.T) {
+	movements := projectionFixture()
+	failing := func(entryTime time.Time, budgetCode int, locationID uint) (float64, uint, error) {
+		return 0, 0, errors.New("rates query failed")
+	}
+
+	if err := projectOwedAmounts(movements, MovementFilter{Estado: "activos"}, failing); err == nil {
+		t.Fatal("expected the rate lookup error to be returned")
+	}
+}
+
+func TestCalculateOwedAmountReturnsDatabaseErrors(t *testing.T) {
+	useUnreachableDB(t)
+
+	if _, _, err := CalculateOwedAmount(time.Now().Add(-time.Hour), 1211300101, 1); err == nil {
+		t.Fatal("expected an error when the database is unreachable")
 	}
 }

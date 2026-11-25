@@ -18,10 +18,15 @@ func GetMovementByID(pagoID string) (*models.Movement, error) {
 	return &movement, nil
 }
 
-func CalculateOwedAmount(entryTime time.Time, budgetCode int, locationID uint) (float64, uint) {
+// CalculateOwedAmount returns the amount owed if the vehicle left now and the minutes elapsed.
+// A rate without configured tiers owes nothing; a failed rate lookup returns its error.
+func CalculateOwedAmount(entryTime time.Time, budgetCode int, locationID uint) (float64, uint, error) {
 	rates, err := GetRatesForCalculation(budgetCode, locationID)
-	if err != nil || len(rates) == 0 {
-		return 0, 0
+	if err != nil {
+		return 0, 0, err
+	}
+	if len(rates) == 0 {
+		return 0, 0, nil
 	}
 
 	diff := time.Now().Sub(entryTime).Minutes()
@@ -62,7 +67,7 @@ func CalculateOwedAmount(entryTime time.Time, budgetCode int, locationID uint) (
 		totalOwed += float64(remainingUnits) * lastRate.PrecioUnitario
 	}
 
-	return totalOwed, totalMinutes
+	return totalOwed, totalMinutes, nil
 }
 
 func RegisterAnnulment(pagoID string, userEmail string) (*models.Movement, error) {
@@ -161,28 +166,37 @@ func GetMovements(filter MovementFilter, page int, pageSize int) ([]models.Movem
 		Limit(pageSize).
 		Scan(&movements).Error
 
-	if err == nil {
-		projectOwedAmounts(movements, filter, CalculateOwedAmount)
+	if err != nil {
+		return nil, 0, 0, err
 	}
 
-	return movements, totalCount, totalIngresos, err
+	if err := projectOwedAmounts(movements, filter, CalculateOwedAmount); err != nil {
+		return nil, 0, 0, err
+	}
+
+	return movements, totalCount, totalIngresos, nil
 }
 
-type owedAmountCalculator func(entryTime time.Time, budgetCode int, locationID uint) (float64, uint)
+type owedAmountCalculator func(entryTime time.Time, budgetCode int, locationID uint) (float64, uint, error)
 
 // projectOwedAmounts replaces monto_total of open movements (no exit yet) with the amount
 // owed if the vehicle left now. The "activos" filter always projects; "todos" projects only
 // when requested. Closed or annulled movements keep the amount stored by the app.
-func projectOwedAmounts(movements []models.Movement, filter MovementFilter, calculate owedAmountCalculator) {
+// A failed rate lookup aborts the projection instead of showing $0 as if nothing were owed.
+func projectOwedAmounts(movements []models.Movement, filter MovementFilter, calculate owedAmountCalculator) error {
 	projectAll := filter.Proyeccion && filter.Estado != "cerrados"
 	if filter.Estado != "activos" && !projectAll {
-		return
+		return nil
 	}
 	for i := range movements {
 		if movements[i].FechaHoraSale != nil {
 			continue
 		}
-		monto, _ := calculate(movements[i].FechaHoraEntra, int(movements[i].CodigoPresup), movements[i].UbicacionID)
+		monto, _, err := calculate(movements[i].FechaHoraEntra, int(movements[i].CodigoPresup), movements[i].UbicacionID)
+		if err != nil {
+			return err
+		}
 		movements[i].MontoTotal = monto
 	}
+	return nil
 }
