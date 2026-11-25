@@ -24,20 +24,26 @@ func GetDashboardStats(locationID uint) (DashboardStats, error) {
 	today := time.Now().Format("2006-01-02")
 
 	// Total movements
-	database.DB.Model(&models.Movement{}).
+	if err := database.DB.Model(&models.Movement{}).
 		Where("DATE(fecha_horaentra) = ? AND ubicacion_id_fk = ?", today, locationID).
-		Count(&stats.Total)
+		Count(&stats.Total).Error; err != nil {
+		return DashboardStats{}, err
+	}
 
 	// Active vehicles
-	database.DB.Model(&models.Movement{}).
+	if err := database.DB.Model(&models.Movement{}).
 		Where("DATE(fecha_horaentra) = ? AND ubicacion_id_fk = ? AND fecha_horasale IS NULL", today, locationID).
-		Count(&stats.Activos)
+		Count(&stats.Activos).Error; err != nil {
+		return DashboardStats{}, err
+	}
 
 	// Total revenue
-	database.DB.Model(&models.Movement{}).
+	if err := database.DB.Model(&models.Movement{}).
 		Where("DATE(fecha_horaentra) = ? AND ubicacion_id_fk = ?", today, locationID).
 		Select("IFNULL(SUM(monto_total), 0)").
-		Row().Scan(&stats.Ingresos)
+		Row().Scan(&stats.Ingresos); err != nil {
+		return DashboardStats{}, err
+	}
 
 	return stats, nil
 }
