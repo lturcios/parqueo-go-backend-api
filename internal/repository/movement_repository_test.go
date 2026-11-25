@@ -116,3 +116,14 @@ func TestCalculateOwedAmountReturnsDatabaseErrors(t *testing.T) {
 		t.Fatal("expected an error when the database is unreachable")
 	}
 }
+
+func TestVehicleRateQueryOnlyMatchesCurrentVehicleRatesOfTheLocation(t *testing.T) {
+	var rates []models.Rate
+	sql := vehicleRateQuery(dryRunDB(t), 1002, 8).Find(&rates).Statement.SQL.String()
+
+	for _, want := range []string{"codigo_presup = ?", "ubicacion_id_fk = ?", "vigente = 1", "(iconfile IS NULL OR iconfile <= 10)", "ORDER BY tiempo_minimo ASC", "LIMIT ?"} {
+		if !strings.Contains(sql, want) {
+			t.Errorf("expected %q in vehicle rate query, got: %s", want, sql)
+		}
+	}
+}
