@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/parqueo/api/internal/domain/models"
+	"github.com/parqueo/api/internal/ratechange"
 
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
@@ -18,7 +19,7 @@ func dryRunDB(t *testing.T) *gorm.DB {
 	db, err := gorm.Open(mysql.New(mysql.Config{
 		DSN:                       "user:pass@tcp(127.0.0.1:1)/none",
 		SkipInitializeWithVersion: true,
-	}), &gorm.Config{DryRun: true, DisableAutomaticPing: true})
+	}), &gorm.Config{DryRun: true, DisableAutomaticPing: true, SkipDefaultTransaction: true})
 	if err != nil {
 		t.Fatalf("open dry-run db: %v", err)
 	}
@@ -125,5 +126,33 @@ func TestVehicleRateQueryOnlyMatchesCurrentVehicleRatesOfTheLocation(t *testing.
 		if !strings.Contains(sql, want) {
 			t.Errorf("expected %q in vehicle rate query, got: %s", want, sql)
 		}
+	}
+}
+
+func TestRateChangeUpdateOnlyTouchesTheThreeFieldsOfAnOpenTicket(t *testing.T) {
+	change := ratechange.Change{RateCode: 1002, UnitPrice: 1, Observations: "Tarifa cambiada de A a B por x el 2026-11-25 10:00"}
+	stmt := rateChangeUpdate(dryRunDB(t), 8, "G5V._iBQMhib04_P", change).Statement
+	sql := stmt.SQL.String()
+
+	if !strings.HasPrefix(sql, "UPDATE `parkmovimientos` SET ") {
+		t.Fatalf("expected an UPDATE of parkmovimientos, got: %s", sql)
+	}
+	set := sql[len("UPDATE `parkmovimientos` SET "):strings.Index(sql, " WHERE ")]
+	for _, column := range strings.Split(set, ",") {
+		name := strings.Trim(strings.TrimSpace(strings.SplitN(column, "=", 2)[0]), "`")
+		if name != "codigo_presup" && name != "precio_unitario" && name != "observaciones" {
+			t.Errorf("unexpected column %q in: %s", name, sql)
+		}
+	}
+	if strings.Count(set, "=") != 3 {
+		t.Errorf("expected exactly 3 columns, got: %s", set)
+	}
+	for _, want := range []string{"pago_id = ?", "ubicacion_id_fk = ?", "fecha_horasale IS NULL", "fecha_horapago IS NULL", "fecha_hora_anula IS NULL"} {
+		if !strings.Contains(sql, want) {
+			t.Errorf("expected %q in: %s", want, sql)
+		}
+	}
+	if len(stmt.Vars) != 5 {
+		t.Errorf("expected 3 values and 2 filters, got %v", stmt.Vars)
 	}
 }

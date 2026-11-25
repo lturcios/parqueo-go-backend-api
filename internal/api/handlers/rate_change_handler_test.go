@@ -167,3 +167,43 @@ func TestFeaturesEndpointReportsAvailability(t *testing.T) {
 		t.Fatalf("expected cambio_tarifa=false without Firestore, got %v", payload)
 	}
 }
+
+type stubMirror struct {
+	updated bool
+	err     error
+}
+
+func (m stubMirror) ApplyRateChange(locationID uint, pagoID string, change ratechange.Change) (bool, error) {
+	return m.updated, m.err
+}
+
+func TestChangeRateEndpointReportsMySQLCopy(t *testing.T) {
+	cases := []struct {
+		name   string
+		mirror stubMirror
+		want   bool
+	}{
+		{"MySQL updated", stubMirror{updated: true}, true},
+		{"movement not in MySQL yet", stubMirror{updated: false}, false},
+		{"MySQL failure keeps the Firestore change", stubMirror{err: errors.New("mysql down")}, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			store := &stubStore{connected: true, ticket: ratechange.Ticket{RateCode: 1001, Active: true}}
+			svc := service(store)
+			svc.Mirror = tc.mirror
+
+			status, payload := send(t, rateChangeApp(svc), "PATCH", "/movements/G5V._iBQMhib04_P/tarifa", `{"codigo_presup":1002}`)
+
+			if status != fiber.StatusOK {
+				t.Fatalf("expected 200, got %d (%v)", status, payload)
+			}
+			if payload["mysql_actualizado"] != tc.want {
+				t.Fatalf("expected mysql_actualizado=%v, got %v", tc.want, payload)
+			}
+			if store.written == nil {
+				t.Fatal("expected the Firestore change to be written")
+			}
+		})
+	}
+}

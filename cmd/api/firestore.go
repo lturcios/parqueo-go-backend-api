@@ -13,7 +13,7 @@ import (
 // newRateChanger connects to Firestore when FIREBASE_PROJECT_ID is set. Without it, or when
 // the connection fails, the API still starts and the rate change reports itself unavailable.
 func newRateChanger() *ratechange.Service {
-	svc := &ratechange.Service{Rates: repository.RateCatalog{}, Now: time.Now}
+	svc := &ratechange.Service{Rates: repository.RateCatalog{}, Mirror: repository.MovementMirror{}, Now: time.Now}
 	store, err := firestoredb.Connect(context.Background())
 	switch {
 	case err != nil:

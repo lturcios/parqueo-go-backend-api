@@ -58,7 +58,7 @@ func ChangeRate(svc *ratechange.Service) fiber.Handler {
 		ctx, cancel := context.WithTimeout(c.UserContext(), firestoreTimeout)
 		defer cancel()
 
-		err := svc.ChangeRate(ctx, ratechange.Request{
+		result, err := svc.ChangeRate(ctx, ratechange.Request{
 			LocationID:  locationID,
 			PagoID:      pagoID,
 			NewRateCode: req.CodigoPresup,
@@ -66,7 +66,15 @@ func ChangeRate(svc *ratechange.Service) fiber.Handler {
 		})
 		switch {
 		case err == nil:
-			return c.JSON(fiber.Map{"pago_id": pagoID, "codigo_presup": req.CodigoPresup})
+			if result.MySQLErr != nil {
+				// Firestore already has the change; the Cloud Function sync remains the fallback.
+				log.Printf("change rate: movement %s at location %d stored in Firestore, MySQL copy failed: %v", pagoID, locationID, result.MySQLErr)
+			}
+			return c.JSON(fiber.Map{
+				"pago_id":           pagoID,
+				"codigo_presup":     req.CodigoPresup,
+				"mysql_actualizado": result.MySQLUpdated,
+			})
 		case errors.Is(err, ratechange.ErrUnavailable):
 			return c.Status(403).JSON(fiber.Map{"error": err.Error()})
 		case errors.Is(err, ratechange.ErrNotFound):
