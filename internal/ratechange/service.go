@@ -69,7 +69,7 @@ type Rates interface {
 // the movement is still open there. updated is false when no open row matched, for example
 // because the Cloud Function has not inserted the entry yet.
 type Mirror interface {
-	ApplyRateChange(locationID uint, pagoID string, change Change) (updated bool, err error)
+	ApplyRateChange(ctx context.Context, locationID uint, pagoID string, change Change) (updated bool, err error)
 }
 
 // Result describes a rate change that was stored in Firestore.
@@ -172,7 +172,7 @@ func (s *Service) ChangeRate(ctx context.Context, req Request) (Result, error) {
 	if s.Mirror == nil {
 		return Result{}, nil
 	}
-	updated, err := s.Mirror.ApplyRateChange(req.LocationID, req.PagoID, committed)
+	updated, err := s.Mirror.ApplyRateChange(ctx, req.LocationID, req.PagoID, committed)
 	return Result{MySQLUpdated: updated && err == nil, MySQLErr: err}, nil
 }
 

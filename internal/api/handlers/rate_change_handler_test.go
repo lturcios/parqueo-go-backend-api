@@ -173,7 +173,7 @@ type stubMirror struct {
 	err     error
 }
 
-func (m stubMirror) ApplyRateChange(locationID uint, pagoID string, change ratechange.Change) (bool, error) {
+func (m stubMirror) ApplyRateChange(ctx context.Context, locationID uint, pagoID string, change ratechange.Change) (bool, error) {
 	return m.updated, m.err
 }
 

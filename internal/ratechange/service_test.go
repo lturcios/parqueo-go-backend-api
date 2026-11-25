@@ -213,7 +213,10 @@ type fakeMirror struct {
 	calls   []Change
 }
 
-func (f *fakeMirror) ApplyRateChange(locationID uint, pagoID string, change Change) (bool, error) {
+func (f *fakeMirror) ApplyRateChange(ctx context.Context, locationID uint, pagoID string, change Change) (bool, error) {
+	if ctx == nil {
+		return false, errors.New("missing context")
+	}
 	if locationID != 8 || pagoID != "G5V._iBQMhib04_P" {
 		return false, errors.New("unexpected ticket")
 	}

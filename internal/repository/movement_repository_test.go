@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"testing"
@@ -154,5 +155,24 @@ func TestRateChangeUpdateOnlyTouchesTheThreeFieldsOfAnOpenTicket(t *testing.T) {
 	}
 	if len(stmt.Vars) != 5 {
 		t.Errorf("expected 3 values and 2 filters, got %v", stmt.Vars)
+	}
+}
+
+func TestMovementMirrorStopsWhenTheRequestIsCancelled(t *testing.T) {
+	useUnreachableDB(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	start := time.Now()
+	updated, err := MovementMirror{}.ApplyRateChange(ctx, 8, "G5V._iBQMhib04_P", ratechange.Change{RateCode: 1002})
+
+	if err == nil || updated {
+		t.Fatalf("expected a cancelled request to fail, got %v, %v", updated, err)
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context.Canceled, got %v", err)
+	}
+	if elapsed := time.Since(start); elapsed > 500*time.Millisecond {
+		t.Fatalf("expected an immediate return, took %v", elapsed)
 	}
 }

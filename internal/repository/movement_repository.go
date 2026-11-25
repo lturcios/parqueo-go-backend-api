@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"context"
 	"math"
 	"time"
 
@@ -219,7 +220,8 @@ func rateChangeUpdate(db *gorm.DB, locationID uint, pagoID string, change ratech
 }
 
 // ApplyRateChange copies a rate change to MySQL; updated is false when no open movement matched.
-func (MovementMirror) ApplyRateChange(locationID uint, pagoID string, change ratechange.Change) (bool, error) {
-	result := rateChangeUpdate(database.DB, locationID, pagoID, change)
+// The request context bounds the query, so a stalled connection cannot hold the request.
+func (MovementMirror) ApplyRateChange(ctx context.Context, locationID uint, pagoID string, change ratechange.Change) (bool, error) {
+	result := rateChangeUpdate(database.DB.WithContext(ctx), locationID, pagoID, change)
 	return result.RowsAffected > 0, result.Error
 }
