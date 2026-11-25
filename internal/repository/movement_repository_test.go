@@ -188,7 +188,7 @@ func TestReportMovementsQueryUsesJornadaBounds(t *testing.T) {
 		"p.fecha_horasale IS NULL",
 		"p.fecha_horaentra > ? AND p.fecha_horaentra <= ?",
 		"AS tarifa_descripcion",
-		"ORDER BY p.fecha_horaentra ASC",
+		"ORDER BY p.fecha_horaentra ASC, p.pago_id ASC",
 		"LIMIT ?",
 	} {
 		if !strings.Contains(sql, want) {

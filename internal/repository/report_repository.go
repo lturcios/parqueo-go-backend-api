@@ -53,12 +53,13 @@ func GetReportContext(locationID uint) (ReportContext, error) {
 }
 
 // reportMovementsQuery selects the regular movements of the location that entered within the
-// jornada span (after, until], oldest first, with the same filters as the movements listing.
+// jornada span (after, until], oldest first (pago_id breaks ties so pages are stable), with
+// the same filters as the movements listing.
 func reportMovementsQuery(db *gorm.DB, locationID uint, estado, after, until string) *gorm.DB {
 	return movementsQuery(db, MovementFilter{UbicacionID: locationID, Estado: estado, Tipo: "normal"}).
 		Where("p.fecha_horaentra > ? AND p.fecha_horaentra <= ?", after, until).
 		Select(movementsSelect).
-		Order("p.fecha_horaentra ASC")
+		Order("p.fecha_horaentra ASC, p.pago_id ASC")
 }
 
 // GetReportMovements returns at most limit movements of the jornada span.
