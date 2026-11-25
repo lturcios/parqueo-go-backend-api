@@ -3,7 +3,6 @@ package handlers
 import (
 	"github.com/gofiber/fiber/v2"
 	"github.com/golang-jwt/jwt/v4"
-	"github.com/parqueo/api/internal/domain/models"
 	"github.com/parqueo/api/internal/repository"
 	"github.com/spf13/cast"
 )
@@ -90,51 +89,6 @@ func GetOtherRates(c *fiber.Ctx) error {
 	}
 
 	return c.JSON(rates)
-}
-
-func RegisterEntry(c *fiber.Ctx) error {
-	user := c.Locals("user").(*jwt.Token)
-	claims := user.Claims.(jwt.MapClaims)
-	locationID := uint(claims["ubicacion_id"].(float64))
-	userEmail := claims["email"].(string)
-
-	var movement models.Movement
-	if err := c.BodyParser(&movement); err != nil {
-		return c.Status(400).JSON(fiber.Map{"error": "Cannot parse JSON"})
-	}
-
-	movement.UbicacionID = locationID
-	movement.UsuarioEntrada = userEmail
-	
-	rate, err := repository.GetRate(int(movement.CodigoPresup), locationID)
-	if err != nil {
-		return c.Status(400).JSON(fiber.Map{"error": "Invalid rate code"})
-	}
-	movement.PrecioUnitario = rate.PrecioUnitario
-
-	if err := repository.RegisterEntry(&movement); err != nil {
-		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
-	}
-
-	return c.Status(201).JSON(movement)
-}
-
-func RegisterExit(c *fiber.Ctx) error {
-	user := c.Locals("user").(*jwt.Token)
-	claims := user.Claims.(jwt.MapClaims)
-	userEmail := claims["email"].(string)
-
-	pagoID := c.Params("id")
-	if pagoID == "" {
-		return c.Status(400).JSON(fiber.Map{"error": "ID is required"})
-	}
-
-	movement, err := repository.RegisterExit(pagoID, userEmail)
-	if err != nil {
-		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
-	}
-
-	return c.JSON(movement)
 }
 
 func RegisterAnnulment(c *fiber.Ctx) error {

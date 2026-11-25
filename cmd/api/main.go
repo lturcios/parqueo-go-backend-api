@@ -35,8 +35,6 @@ func main() {
 	api.Get("/dashboard/stats", handlers.GetDashboardStats)
 	api.Get("/dashboard/analytics", handlers.GetDashboardAnalytics)
 	api.Get("/movements", handlers.GetMovements)
-	api.Post("/movements/entrada", handlers.RegisterEntry)
-	api.Patch("/movements/salida/:id", handlers.RegisterExit)
 	api.Patch("/movements/anular/:id", handlers.RegisterAnnulment)
 	api.Get("/rates", handlers.GetRates)
 	api.Get("/rates/other", handlers.GetOtherRates)

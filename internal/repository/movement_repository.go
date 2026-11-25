@@ -1,7 +1,6 @@
 package repository
 
 import (
-	"fmt"
 	"math"
 	"time"
 
@@ -9,12 +8,6 @@ import (
 	"github.com/parqueo/api/internal/domain/models"
 	"gorm.io/gorm"
 )
-
-func RegisterEntry(movement *models.Movement) error {
-	movement.PagoID = fmt.Sprintf("%d%s", time.Now().Unix(), movement.Placa)
-	movement.FechaHoraEntra = time.Now()
-	return database.DB.Create(movement).Error
-}
 
 func GetMovementByID(pagoID string) (*models.Movement, error) {
 	var movement models.Movement
@@ -70,26 +63,6 @@ func CalculateOwedAmount(entryTime time.Time, budgetCode int, locationID uint) (
 	}
 
 	return totalOwed, totalMinutes
-}
-
-func RegisterExit(pagoID string, userEmail string) (*models.Movement, error) {
-	movement, err := GetMovementByID(pagoID)
-	if err != nil {
-		return nil, err
-	}
-
-	now := time.Now()
-	movement.FechaHoraSale = &now
-	movement.UsuarioSalida = &userEmail
-
-	monto, minutos := CalculateOwedAmount(movement.FechaHoraEntra, int(movement.CodigoPresup), movement.UbicacionID)
-	
-	movement.TiempoMinutos = &minutos
-	movement.MontoTotal = monto
-	movement.FechaHoraPago = &now
-
-	err = database.DB.Save(movement).Error
-	return movement, err
 }
 
 func RegisterAnnulment(pagoID string, userEmail string) (*models.Movement, error) {
