@@ -35,6 +35,7 @@ func main() {
 	api.Get("/dashboard/stats", handlers.GetDashboardStats)
 	api.Get("/dashboard/analytics", handlers.GetDashboardAnalytics)
 	api.Get("/movements", handlers.GetMovements)
+	api.Get("/reports/movements", handlers.GetMovementsReport)
 	api.Patch("/movements/anular/:id", handlers.RegisterAnnulment)
 	api.Patch("/movements/:pagoId/tarifa", handlers.ChangeRate(rateChanger))
 	api.Get("/features", handlers.GetFeatures(rateChanger))

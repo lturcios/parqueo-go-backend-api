@@ -176,3 +176,35 @@ func TestMovementMirrorStopsWhenTheRequestIsCancelled(t *testing.T) {
 		t.Fatalf("expected an immediate return, took %v", elapsed)
 	}
 }
+
+func TestReportMovementsQueryUsesJornadaBounds(t *testing.T) {
+	var rows []models.Movement
+	stmt := reportMovementsQuery(dryRunDB(t), 8, "activos", "2026-11-24 15:00:00", "2026-11-25 15:00:00").Limit(10001).Find(&rows).Statement
+	sql := stmt.SQL.String()
+
+	for _, want := range []string{
+		"p.ubicacion_id_fk = ?",
+		"LOWER(p.placa) != ?",
+		"p.fecha_horasale IS NULL",
+		"p.fecha_horaentra > ? AND p.fecha_horaentra <= ?",
+		"AS tarifa_descripcion",
+		"ORDER BY p.fecha_horaentra ASC, p.pago_id ASC",
+		"LIMIT ?",
+	} {
+		if !strings.Contains(sql, want) {
+			t.Errorf("expected %q in report query, got: %s", want, sql)
+		}
+	}
+	if strings.Contains(sql, "DATE(") || strings.Contains(strings.ToUpper(sql), "JOIN") {
+		t.Errorf("report query must not filter by calendar date nor join rates, got: %s", sql)
+	}
+	found := false
+	for _, v := range stmt.Vars {
+		if v == "2026-11-24 15:00:00" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected the jornada start among the query values, got %v", stmt.Vars)
+	}
+}

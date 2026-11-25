@@ -34,3 +34,11 @@ func TestGetDashboardStatsReturnsDatabaseErrors(t *testing.T) {
 		t.Fatalf("expected an error when the database is unreachable, got stats %+v", stats)
 	}
 }
+
+func TestGetReportContextReturnsDatabaseErrors(t *testing.T) {
+	useUnreachableDB(t)
+
+	if ctx, err := GetReportContext(8); err == nil {
+		t.Fatalf("expected an error when the database is unreachable, got %+v", ctx)
+	}
+}
